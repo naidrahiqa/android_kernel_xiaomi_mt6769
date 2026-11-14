@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# OPLUS HANS kernel <-> userspace bridge.
+#
+
+config OPLUS_FEATURE_HANS
+	bool "OPLUS HANS app freezer bridge"
+	depends on NET && INET && NETFILTER
+	depends on ANDROID_BINDER_IPC
+	default n
+	help
+	  Enable the generic netlink bridge used by the OPLUS HANS native
+	  daemon.  The kernel reports binder transactions, signals and
+	  incoming network packets that target frozen applications so the
+	  daemon can thaw them.
+
+	  Required for ColorOS/OxygenOS HANS background-app freezing.
+	  If unsure, say N.

@@ -513,6 +513,9 @@ CONFIG_CRYPTO_ZSTD=y
 CONFIG_LOCALVERSION="-Bliss_unified-2026.11.04-s"
 # CONFIG_LOCALVERSION_AUTO is not set
 
+# --- OPLUS HANS bridge (ColorOS 17 app freezer) ---
+CONFIG_OPLUS_FEATURE_HANS=y
+
 # --- KernelSU-Next (v3.3.0-legacy-susfs) ---
 # 4.14 icin MANUEL hook: KSU Kconfig i kprobes/tracepoint hook u icin
 # "should not be used on kernel below 5.10" diyor.
