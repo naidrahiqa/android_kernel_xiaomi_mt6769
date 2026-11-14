@@ -36,6 +36,7 @@
 
 #define HANS_FAMILY_VERSION	1
 #define HANS_FAMILY		"oplus_hans"
+#define NETLINK_OPLUS_HANS	29
 
 /* Generic netlink attribute type. */
 enum {

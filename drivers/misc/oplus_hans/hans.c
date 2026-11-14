@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * OPLUS HANS generic netlink bridge.
+ * OPLUS HANS netlink bridge.
  *
- * Kernel side of the HANS (Hybrid App Notification Service) freezer.  The
- * native daemon performs a LOOP_BACK handshake, registers UIDs whose network
+ * Kernel side of the HANS (Hybrid App Notification Service) freezer.
+ * Supports both:
+ *  - Raw Netlink Protocol 29 (used by /system_ext/bin/hans on kernel < 5.10)
+ *  - Generic Netlink "oplus_hans" (used on kernel >= 5.10)
+ *
+ * The native daemon performs a LOOP_BACK handshake, registers UIDs whose network
  * traffic should thaw them (PKG) and asks the kernel to scan binder state
- * before freezing a UID (FROZEN_TRANS/CPUCTL_TRANS).  The kernel reports
+ * before freezing a UID (FROZEN_TRANS/CPUCTL_TRANS). The kernel reports
  * binder/signal/network wakeup events back to the daemon.
  *
  * Ported from vendor/oplus/kernel/system/oplus_hans to the MediaTek MT6769
@@ -26,6 +30,9 @@
 #define NETLINK_PORT_HANS	(0x15356)
 
 static atomic_t hans_daemon_port;
+static bool hans_is_raw_netlink = false;
+static struct sock *hans_nl_sock = NULL;
+
 static int hans_handler(struct sk_buff *skb, struct genl_info *info);
 
 static const struct genl_ops hans_genl_ops[] = {
@@ -70,7 +77,7 @@ static int genl_msg_mk_usr_msg(struct sk_buff *skb, int type, void *data,
 
 /*
  * Reuse the LOOP_BACK/PKG channel to tell the framework that this kernel
- * supports the cgroup-v2 freezer.  The daemon then uses FROZEN_TRANS instead
+ * supports the cgroup-v2 freezer. The daemon then uses FROZEN_TRANS instead
  * of the legacy CPUCTL solution.
  */
 static void hans_kern_support_cgrpv2(void)
@@ -80,18 +87,13 @@ static void hans_kern_support_cgrpv2(void)
 }
 
 /*
- * Report a HANS event to the native daemon.  Empty parameters are filled
+ * Report a HANS event to the native daemon. Empty parameters are filled
  * with -1 by the caller.
  */
 int hans_report(int type, int caller_pid, int caller_uid, int target_pid,
 		int target_uid, const char *rpc_name, int code)
 {
 	struct hans_message data;
-	struct sk_buff *skb = NULL;
-	void *head;
-	size_t size;
-	int len;
-	int ret;
 	int port;
 
 	if (type >= HANS_TYPE_MAX) {
@@ -105,15 +107,6 @@ int hans_report(int type, int caller_pid, int caller_uid, int target_pid,
 		return HANS_ERROR;
 	}
 
-	len = sizeof(struct hans_message);
-	size = nla_total_size(len);
-
-	ret = genl_msg_prepare_usr_msg(HANS_CMD_GENL, size, (pid_t)port, &skb);
-	if (ret) {
-		pr_err("genl_msg_prepare_usr_msg failed\n");
-		return HANS_ERROR;
-	}
-
 	memset(&data, 0, sizeof(data));
 	data.type = type;
 	data.port = NETLINK_PORT_HANS;
@@ -124,59 +117,83 @@ int hans_report(int type, int caller_pid, int caller_uid, int target_pid,
 	data.pkg_cmd = -1;	/* invalid package cmd */
 	data.code = code;
 	data.persistent = 0;
-	strlcpy(data.rpc_name, rpc_name, INTERFACETOKEN_BUFF_SIZE);
+	if (rpc_name)
+		strlcpy(data.rpc_name, rpc_name, INTERFACETOKEN_BUFF_SIZE);
 
-	ret = genl_msg_mk_usr_msg(skb, HANS_ATTR_MSG_GENL, &data, len);
-	if (ret) {
-		pr_err("genl_msg_mk_usr_msg failed\n");
-		kfree_skb(skb);
-		return HANS_ERROR;
+	/* Raw Netlink protocol 29 mode (kernel 4.14 hans native daemon) */
+	if (hans_is_raw_netlink && hans_nl_sock) {
+		struct sk_buff *skb;
+		struct nlmsghdr *nlh;
+		int len = sizeof(struct hans_message);
+		int ret;
+
+		skb = nlmsg_new(len, GFP_ATOMIC);
+		if (!skb) {
+			pr_err("raw nlmsg_new failed\n");
+			return HANS_ERROR;
+		}
+
+		nlh = nlmsg_put(skb, (u32)port, 0, 0, len, 0);
+		if (!nlh) {
+			kfree_skb(skb);
+			pr_err("raw nlmsg_put failed\n");
+			return HANS_ERROR;
+		}
+
+		memcpy(nlmsg_data(nlh), &data, len);
+		ret = netlink_unicast(hans_nl_sock, skb, (u32)port, MSG_DONTWAIT);
+		if (ret < 0) {
+			pr_err("netlink_unicast (proto 29) failed, err = %d\n", ret);
+			return HANS_ERROR;
+		}
+		return HANS_NOERROR;
 	}
 
-	head = genlmsg_data(nlmsg_data(nlmsg_hdr(skb)));
-	genlmsg_end(skb, head);
+	/* Generic Netlink mode (kernel >= 5.10) */
+	{
+		struct sk_buff *skb = NULL;
+		void *head;
+		size_t size;
+		int len = sizeof(struct hans_message);
+		int ret;
 
-	ret = genlmsg_unicast(&init_net, skb, (u32)port);
-	if (ret < 0) {
-		pr_err("genlmsg_unicast failed, err = %d\n", ret);
-		return HANS_ERROR;
+		size = nla_total_size(len);
+		ret = genl_msg_prepare_usr_msg(HANS_CMD_GENL, size, (pid_t)port, &skb);
+		if (ret) {
+			pr_err("genl_msg_prepare_usr_msg failed\n");
+			return HANS_ERROR;
+		}
+
+		ret = genl_msg_mk_usr_msg(skb, HANS_ATTR_MSG_GENL, &data, len);
+		if (ret) {
+			pr_err("genl_msg_mk_usr_msg failed\n");
+			kfree_skb(skb);
+			return HANS_ERROR;
+		}
+
+		head = genlmsg_data(nlmsg_data(nlmsg_hdr(skb)));
+		genlmsg_end(skb, head);
+
+		ret = genlmsg_unicast(&init_net, skb, (u32)port);
+		if (ret < 0) {
+			pr_err("genlmsg_unicast failed, err = %d\n", ret);
+			return HANS_ERROR;
+		}
+		return HANS_NOERROR;
 	}
-
-	return HANS_NOERROR;
 }
 
-/* Handle a message from the HANS native daemon. */
-static int hans_handler(struct sk_buff *skb, struct genl_info *info)
+/* Common parser for messages received from the daemon */
+static int hans_process_data(struct hans_message *data, size_t len, bool is_raw)
 {
-	struct hans_message *data = NULL;
-	struct nlmsghdr *nlh;
-	struct genlmsghdr *genlhdr;
-	struct nlattr *nla;
-	unsigned int len = 0;
-
-	if (!skb) {
-		pr_err("recv skb NULL\n");
+	if (!data)
 		return HANS_ERROR;
-	}
 
-	if (skb->len < NLMSG_SPACE(0))
-		return HANS_NOERROR;
-
-	nlh = nlmsg_hdr(skb);
-	genlhdr = nlmsg_data(nlh);
-	nla = genlmsg_data(genlhdr);
-
-	if (nla->nla_type != HANS_ATTR_MSG_GENL)
-		return HANS_NOERROR;
-
-	len = nla_len(nla);
-	data = (struct hans_message *)nla_data(nla);
-
-	pr_debug("nla_len=%d, len=%d, sizeof(struct hans_message)=%zu\n",
-		 nla->nla_len, len, sizeof(struct hans_message));
+	pr_debug("hans_process_data: len=%zu, sizeof=%zu, is_raw=%d\n",
+		 len, sizeof(struct hans_message), is_raw);
 
 	if (len < (sizeof(struct hans_message) - sizeof(int))) {
-		pr_err("hans_message len check failed! len = %d min = %zu\n",
+		pr_err("hans_message len check failed! len = %zu min = %zu\n",
 		       len, sizeof(struct hans_message) - sizeof(int));
 		return HANS_ERROR;
 	}
@@ -199,10 +216,12 @@ static int hans_handler(struct sk_buff *skb, struct genl_info *info)
 
 	switch (data->type) {
 	case HANS_LOOP_BACK:
+		hans_is_raw_netlink = is_raw;
 		atomic_set(&hans_daemon_port, data->port);
 		hans_report(HANS_LOOP_BACK, -1, -1, -1, -1,
 			    "loop back", CPUCTL_VERSION);
-		pr_info("LOOP_BACK, port = %d\n", data->port);
+		pr_info("LOOP_BACK, port = %d (raw_proto29 = %d)\n",
+			data->port, is_raw);
 		hans_kern_support_cgrpv2();
 		break;
 
@@ -240,22 +259,87 @@ static int hans_handler(struct sk_buff *skb, struct genl_info *info)
 	return HANS_NOERROR;
 }
 
+/* Handler for Raw Netlink Protocol 29 */
+static void hans_nl_rcv_msg(struct sk_buff *skb)
+{
+	struct nlmsghdr *nlh;
+	struct hans_message *data;
+	size_t len;
+
+	if (!skb || skb->len < NLMSG_SPACE(0))
+		return;
+
+	nlh = nlmsg_hdr(skb);
+	if (!nlh || skb->len < nlh->nlmsg_len ||
+	    nlh->nlmsg_len < NLMSG_SPACE(sizeof(struct hans_message) - sizeof(int)))
+		return;
+
+	data = (struct hans_message *)NLMSG_DATA(nlh);
+	len = nlh->nlmsg_len - NLMSG_HDRLEN;
+	hans_process_data(data, len, true);
+}
+
+/* Handler for Generic Netlink */
+static int hans_handler(struct sk_buff *skb, struct genl_info *info)
+{
+	struct nlmsghdr *nlh;
+	struct genlmsghdr *genlhdr;
+	struct nlattr *nla;
+	struct hans_message *data;
+	size_t len;
+
+	if (!skb || skb->len < NLMSG_SPACE(0))
+		return HANS_NOERROR;
+
+	nlh = nlmsg_hdr(skb);
+	genlhdr = nlmsg_data(nlh);
+	nla = genlmsg_data(genlhdr);
+
+	if (nla->nla_type != HANS_ATTR_MSG_GENL)
+		return HANS_NOERROR;
+
+	len = nla_len(nla);
+	data = (struct hans_message *)nla_data(nla);
+	return hans_process_data(data, len, false);
+}
+
 static int __init hans_core_init(void)
 {
 	int ret;
+	struct netlink_kernel_cfg cfg = {
+		.input = hans_nl_rcv_msg,
+	};
 
 	atomic_set(&hans_daemon_port, -1);
+	hans_is_raw_netlink = false;
 
+	/* 1. Register raw Netlink Protocol 29 for ColorOS 4.14 daemon */
+	hans_nl_sock = netlink_kernel_create(&init_net, NETLINK_OPLUS_HANS, &cfg);
+	if (!hans_nl_sock)
+		pr_err("netlink_kernel_create for proto %d failed\n", NETLINK_OPLUS_HANS);
+	else
+		pr_info("HANS protocol %d socket created\n", NETLINK_OPLUS_HANS);
+
+	/* 2. Register Generic Netlink family as well */
 	ret = genl_register_family(&hans_genl_family);
 	if (ret) {
 		pr_err("genl_register_family error %d\n", ret);
+		if (hans_nl_sock) {
+			netlink_kernel_release(hans_nl_sock);
+			hans_nl_sock = NULL;
+		}
 		return HANS_ERROR;
 	}
 
+	/* 3. Register Netfilter hooks */
 	ret = hans_netfilter_init();
 	if (ret == HANS_ERROR) {
 		pr_err("netfilter init failed\n");
 		genl_unregister_family(&hans_genl_family);
+		if (hans_nl_sock) {
+			netlink_kernel_release(hans_nl_sock);
+			hans_nl_sock = NULL;
+		}
 		return HANS_ERROR;
 	}
 
@@ -267,6 +351,10 @@ static void __exit hans_core_exit(void)
 {
 	hans_netfilter_deinit();
 	genl_unregister_family(&hans_genl_family);
+	if (hans_nl_sock) {
+		netlink_kernel_release(hans_nl_sock);
+		hans_nl_sock = NULL;
+	}
 	pr_info("HANS bridge exited\n");
 }
 
