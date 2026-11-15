@@ -43,7 +43,6 @@
 #include <linux/compiler.h>
 #include <linux/posix-timers.h>
 #include <linux/cgroup.h>
-#include <linux/oplus_hans.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -1221,10 +1220,6 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 {
 	unsigned long flags;
 	int ret = -ESRCH;
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_HANS)
-	hans_send_signal(sig, current, p);
-#endif
 
 	if (lock_task_sighand(p, &flags)) {
 		ret = send_signal(sig, info, p, group);

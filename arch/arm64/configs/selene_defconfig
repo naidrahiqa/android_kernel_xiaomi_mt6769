@@ -515,9 +515,6 @@ CONFIG_LOCALVERSION="-ArgoNgawiGejesGejes"
 CONFIG_KALLSYMS=y
 CONFIG_KALLSYMS_ALL=y
 
-# --- OPLUS HANS bridge (ColorOS 17 app freezer) ---
-CONFIG_OPLUS_FEATURE_HANS=y
-
 # --- KernelSU-Next (v3.3.0-legacy-susfs) ---
 # 4.14 icin MANUEL hook: KSU Kconfig i kprobes/tracepoint hook u icin
 # "should not be used on kernel below 5.10" diyor.

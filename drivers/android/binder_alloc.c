@@ -31,7 +31,6 @@
 #include <linux/uaccess.h>
 #include <linux/highmem.h>
 #include <linux/ratelimit.h>
-#include <linux/oplus_hans.h>
 #include "binder_alloc.h"
 #include "binder_trace.h"
 
@@ -432,11 +431,6 @@ static struct binder_buffer *binder_alloc_new_buf_locked(
 
 	/* Pad 0-size buffers so they get assigned unique addresses */
 	size = max(size, sizeof(void *));
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_HANS)
-	hans_binder_alloc(alloc->pid, size, alloc->free_async_space,
-			  is_async);
-#endif
 
 	if (is_async && alloc->free_async_space < size) {
 		binder_alloc_debug(BINDER_DEBUG_BUFFER_ALLOC,
