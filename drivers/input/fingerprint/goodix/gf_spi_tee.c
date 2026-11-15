@@ -86,7 +86,8 @@
 
 #define GF_LINUX_VERSION "V1.01.04"
 
-#define GF_NETLINK_ROUTE 29   /* for GF test temporary, need defined in include/uapi/linux/netlink.h */
+#define GF_NETLINK_ROUTE 30   /* for GF test temporary, need defined in include/uapi/linux/netlink.h (30 for selene to avoid clash with oplus_hans 29) */
+static u8 gf_netlink_route = GF_NETLINK_ROUTE;
 #define MAX_NL_MSG_LEN 16
 
 /*************************************************************/
@@ -366,12 +367,14 @@ static int gf_get_gpio_dts_info(struct gf_device *gf_dev)
 static int gf_get_sensor_dts_info(void)
 {
 	struct device_node *node = NULL;
-	int value;
+	int value = 0;
 
 	node = of_find_compatible_node(NULL, NULL, "goodix,goodix-fp");
 	if (node) {
-		of_property_read_u32(node, "netlink-event", &value);
-		gf_debug(DEBUG_LOG, "%s, get netlink event[%d] from dts\n", __func__, value);
+		if (!of_property_read_u32(node, "netlink-event", &value)) {
+			gf_netlink_route = (u8)value;
+		}
+		gf_debug(DEBUG_LOG, "%s, get netlink event[%d] from dts\n", __func__, gf_netlink_route);
 	} else {
 		gf_debug(ERR_LOG, "%s failed to get device node!\n", __func__);
 		return -ENODEV;
@@ -581,7 +584,7 @@ static int gf_netlink_init(struct gf_device *gf_dev)
 	memset(&cfg, 0, sizeof(struct netlink_kernel_cfg));
 	cfg.input = gf_netlink_recv;
 
-	gf_dev->nl_sk = netlink_kernel_create(&init_net, GF_NETLINK_ROUTE, &cfg);
+	gf_dev->nl_sk = netlink_kernel_create(&init_net, gf_netlink_route, &cfg);
 	if (gf_dev->nl_sk == NULL) {
 		gf_debug(ERR_LOG, "[%s] : netlink create failed\n", __func__);
 		return -1;
@@ -781,7 +784,7 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #endif
 	int retval = 0;
 	u8  buf    = 0;
-	u8 netlink_route = GF_NETLINK_ROUTE;
+	u8 netlink_route = gf_netlink_route;
 	struct gf_ioc_chip_info info;
 
 	FUNC_ENTRY();

@@ -879,45 +879,38 @@ static int __init fpc1022_init(void)
 {
 	int error = 0;
 
-	if (goodix_fp_exist)
-		return -EINVAL;
-
-	if (0 != platform_driver_register(&fpc1022_driver)) {
+	if (goodix_fp_exist) {
+		pr_info("fpc %s: goodix sensor already detected, skipping fpc\n", __func__);
 		return -EINVAL;
 	}
 
-	//workaround to solve two spi device
-	if (spi_fingerprint == NULL)
-		pr_debug("%s Line:%d spi device is NULL,cannot spi transfer\n",
-			  __func__, __LINE__);
-	else {
-		error = check_hwid(spi_fingerprint);
+	if (0 != platform_driver_register(&fpc1022_driver)) {
+		pr_err("fpc %s: platform_driver_register failed\n", __func__);
+		return -EINVAL;
+	}
 
-		if (error < 0) {
-			return -EINVAL;
-		}
-		printk(KERN_INFO
-			       "fpc %s, detected sensor, error=%d\n",
-			       __func__, error);
-		fpc1022_fp_exist = true;
-		if (NULL == fpc1022) {
-			printk(KERN_INFO
-			       "fpc %s,fpc1022 is NULL\n",
-			       __func__, error);
-
-		} else {
-			fpc1022->spi = spi_fingerprint;
-		}
-		printk(KERN_INFO
-			       "fpc %s,before memcpy\n",
-			       __func__, error);
-		/********xinan_bp for dual_TA begain *********/
-		memcpy(&uuid_fp, &uuid_ta_fpc, sizeof(struct TEEC_UUID));
-		printk(KERN_INFO
-			       "fpc %s, after memcpy\n",
-			       __func__);
+	fpc1022_fp_exist = true;
+	if (fpc1022 && spi_fingerprint) {
+		fpc1022->spi = spi_fingerprint;
+	}
+	/********xinan_bp for dual_TA begain *********/
+	memcpy(&uuid_fp, &uuid_ta_fpc, sizeof(struct TEEC_UUID));
+	printk(KERN_INFO "fpc %s: fpc1022 initialized, uuid_fp set for TEE\n", __func__);
 	/********xinan_bp for dual_TA end *********/
 
+	//workaround to solve two spi device
+	if (spi_fingerprint == NULL) {
+		pr_debug("%s Line:%d spi device is NULL,cannot spi transfer\n",
+			  __func__, __LINE__);
+	} else {
+		error = check_hwid(spi_fingerprint);
+		if (error < 0) {
+			pr_warn("fpc %s: check_hwid warning (%d), TEE TA will verify\n",
+				__func__, error);
+		} else {
+			printk(KERN_INFO "fpc %s: detected sensor, error=%d\n",
+			       __func__, error);
+		}
 	}
 
 	return 0;
