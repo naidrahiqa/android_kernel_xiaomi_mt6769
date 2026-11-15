@@ -35,7 +35,7 @@
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 extern bool susfs_is_current_ksu_domain(void);
-extern bool susfs_is_sdcard_android_data_decrypted;
+extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
 
 #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -1154,9 +1154,11 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	// - We will just stop checking for ksu process if /sdcard/Android is accessible,
 	//   for the sake of performance
-	if (!READ_ONCE(susfs_is_sdcard_android_data_decrypted) && susfs_is_current_ksu_domain()) {
-		mnt = susfs_alloc_non_unshare_ksu_vfsmnt(name ?: "none");
-		goto bypass_orig_flow;
+	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
+		if (susfs_is_current_ksu_domain()) {
+			mnt = susfs_alloc_non_unshare_ksu_vfsmnt(name ?: "none");
+			goto bypass_orig_flow;
+		}
 	}
 #endif
 	mnt = alloc_vfsmnt(name);
@@ -1220,28 +1222,24 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	bool is_mnt_ksu_unshared = false;
 	// - We will just stop checking for ksu process if /sdcard/Android is accessible,
 	//   for the sake of performance
-	if (READ_ONCE(susfs_is_sdcard_android_data_decrypted)) {
-		goto skip_checking_for_ksu_proc;
-	}
-
-	// - If /sdcard/Android is still not accessible, we keep checking for mounts
-	//   mounted by ksu process
-	if (susfs_is_current_ksu_domain()) {
-		// - If it is unsharing, we re-use the old->mnt_id assign it for mnt->mnt_id directly
-		//   without going thru ida, but we need to set a bit VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT
-		//   on mnt->mnt.mnt_flags below, otherwise we find no other ways to identify if this
-		//   mnt->mnt_id is assigned without ida when it is being freed in mnt_free_id().
-		if (flag & CL_COPY_MNT_NS) {
-			mnt = susfs_alloc_unshare_ksu_vfsmnt(old->mnt_devname, old->mnt_id);
-			is_mnt_ksu_unshared = true;
+	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
+		// - If /sdcard/Android is still not accessible, we keep checking for mounts
+		//   mounted by ksu process
+		if (susfs_is_current_ksu_domain()) {
+			// - If it is unsharing, we re-use the old->mnt_id assign it for mnt->mnt_id directly
+			//   without going thru ida, but we need to set a bit VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT
+			//   on mnt->mnt.mnt_flags below, otherwise we find no other ways to identify if this
+			//   mnt->mnt_id is assigned without ida when it is being freed in mnt_free_id().
+			if (flag & CL_COPY_MNT_NS) {
+				mnt = susfs_alloc_unshare_ksu_vfsmnt(old->mnt_devname, old->mnt_id);
+				is_mnt_ksu_unshared = true;
+				goto bypass_orig_flow;
+			}
+			// else we just go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
+			mnt = susfs_alloc_non_unshare_ksu_vfsmnt(old->mnt_devname);
 			goto bypass_orig_flow;
 		}
-		// else we just go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
-		mnt = susfs_alloc_non_unshare_ksu_vfsmnt(old->mnt_devname);
-		goto bypass_orig_flow;
 	}
-
-skip_checking_for_ksu_proc:
 	// - We keep checking all processes and if old->mnt_id >= DEFAULT_KSU_MNT_ID,
 	//   go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
 	if (old->mnt_id >= DEFAULT_KSU_MNT_ID) {
@@ -3868,11 +3866,14 @@ const struct proc_ns_operations mntns_operations = {
 	.owner		= mntns_owner,
 };
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-/* - To retrieve the non sus mount id from mount */
+#ifdef CONFIG_KSU_SUSFS
+/* - To retrieve the non sus mnt_id from mount */
 int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
 	struct mount *mnt = orig_mnt;
 	int mnt_id;
+
+	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID)
+		return mnt->mnt_id;
 
 	lock_mount_hash();
 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }
@@ -3884,6 +3885,12 @@ int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
 /* - To retrieve the non sus vfsmount from vfsmount, takes a reference on &mnt->mnt and mnt->mnt.mnt_root */
 struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt) {
 	struct mount *mnt = real_mount(vfsmnt);
+
+	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID) {
+		mntget(&mnt->mnt);
+		dget(mnt->mnt.mnt_root);
+		return &mnt->mnt;
+	}
 
 	lock_mount_hash();
 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }
@@ -3897,4 +3904,4 @@ struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt) {
 	unlock_mount_hash();
 	return &mnt->mnt;
 }
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#endif // #ifdef CONFIG_KSU_SUSFS
