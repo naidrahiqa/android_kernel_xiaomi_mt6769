@@ -66,6 +66,10 @@ bool tp_charger_status;
 extern int32_t nvt_set_charger_switch(uint8_t charger_switch);
 /* Huaqin modify for HQ-131628 by shujiawang at 2021/05/10 end */
 
+#if defined(CONFIG_FB)
+extern bool mtkfb_is_suspend(void);
+#endif
+
 #if NVT_TOUCH_EXT_PROC
 extern int32_t nvt_extra_proc_init(void);
 extern void nvt_extra_proc_deinit(void);
@@ -2182,6 +2186,15 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 	/*BSP.TP add nvt_irq - 2020.11.11 - End*/
 	NVT_LOG("end\n");
+
+	/*
+	 * On the ColorOS 16 port for selene the panel can be unblanked before
+	 * this driver probes, so no fb resume event arrives and the gesture
+	 * gate in the ISR would hide normal touch until the next screen
+	 * cycle. Match the current panel state instead of assuming it is on.
+	 */
+	if (!mtkfb_is_suspend())
+		bTouchIsAwake = 1;
 
 	nvt_irq_enable(true);
 
