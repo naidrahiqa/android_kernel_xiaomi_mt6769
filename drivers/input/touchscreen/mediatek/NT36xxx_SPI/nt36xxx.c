@@ -2185,6 +2185,10 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	nvt_irq_enable(true);
 
+	/* COS16: panel can unblank before probe, so no fb resume arrives and the
+	 * gesture gate would hide normal touch until the next screen cycle. */
+	bTouchIsAwake = 1;
+
 	return 0;
 
 #if defined(CONFIG_FB)
