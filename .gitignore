@@ -124,5 +124,11 @@ all.config
 kernel/configs/android-*.cfg
 build.log
 out/
+/out-ksu/
+/out-bakasu/
 /COS16-NOTES.md
 /.opencode/
+*.apk
+*.zip
+*.img
+build.log
