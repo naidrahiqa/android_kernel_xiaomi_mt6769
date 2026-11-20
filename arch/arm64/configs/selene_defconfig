@@ -513,26 +513,25 @@ CONFIG_CRYPTO_ZSTD=y
 CONFIG_LOCALVERSION="-Samvartasthayi"
 # CONFIG_LOCALVERSION_AUTO is not set
 CONFIG_KALLSYMS=y
+CONFIG_DEBUG_KERNEL=y
 CONFIG_KALLSYMS_ALL=y
 
-# --- KernelSU-Next (v3.3.0-legacy-susfs) ---
-# 4.14 icin MANUEL hook: KSU Kconfig i kprobes/tracepoint hook u icin
-# "should not be used on kernel below 5.10" diyor.
+# --- BakaSU (KernelSU fork, non-GKI 4.14, SUSFS inline hook) ---
+# BakaSU detects kernel 4.14 as Non-GKI and uses the SUSFS inline hook:
+# fs/*, kernel/* and drivers/input/input.c call the ksu_handle_* hooks above.
 CONFIG_KSU=y
-CONFIG_KSU_HACK_ARM64_BRANCH_LINK=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
 
 # --- SuSFS (cekirdek tarafi v2.4.0 NON-GKI) ---
-CONFIG_KSU_SUSFS=y
 CONFIG_KSU_SUSFS_SUS_PATH=y
 CONFIG_KSU_SUSFS_SUS_MOUNT=y
 CONFIG_KSU_SUSFS_SUS_KSTAT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
-CONFIG_KSU_SUSFS_TRY_UMOUNT=y
 CONFIG_KSU_SUSFS_SPOOF_UNAME=y
 CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
 CONFIG_KSU_SUSFS_ENABLE_LOG=y
 
 # --- SquashFS ---
