@@ -49,6 +49,7 @@
 #endif
 
 #include <net/sock.h>
+#include <linux/netlink.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spidev.h>
 
@@ -86,9 +87,14 @@
 
 #define GF_LINUX_VERSION "V1.01.04"
 
-#define GF_NETLINK_ROUTE 30   /* for GF test temporary, need defined in include/uapi/linux/netlink.h (30 for selene to avoid clash with oplus_hans 29) */
-static u8 gf_netlink_route = GF_NETLINK_ROUTE;
+#ifdef CONFIG_TARGET_PRODUCT_SELENECOMMON
+#define GF_NETLINK_ROUTE 30   /* selene DTS uses 30, avoids clash with oplus_hans 29 */
+#else
+#define GF_NETLINK_ROUTE 29
+#endif
 #define MAX_NL_MSG_LEN 16
+
+static u8 gf_netlink_route = GF_NETLINK_ROUTE;
 
 /*************************************************************/
 
@@ -367,14 +373,20 @@ static int gf_get_gpio_dts_info(struct gf_device *gf_dev)
 static int gf_get_sensor_dts_info(void)
 {
 	struct device_node *node = NULL;
-	int value = 0;
+	u32 value = 0;
 
 	node = of_find_compatible_node(NULL, NULL, "goodix,goodix-fp");
 	if (node) {
-		if (!of_property_read_u32(node, "netlink-event", &value)) {
-			gf_netlink_route = (u8)value;
+		if (!of_property_read_u32(node, "netlink-event", &value) &&
+		    value < MAX_LINKS) {
+			gf_netlink_route = value;
+			gf_debug(DEBUG_LOG, "%s, netlink event[%d] from dts\n",
+				 __func__, gf_netlink_route);
+		} else {
+			gf_debug(DEBUG_LOG,
+				 "%s, using default netlink event[%d]\n",
+				 __func__, gf_netlink_route);
 		}
-		gf_debug(DEBUG_LOG, "%s, get netlink event[%d] from dts\n", __func__, gf_netlink_route);
 	} else {
 		gf_debug(ERR_LOG, "%s failed to get device node!\n", __func__);
 		return -ENODEV;
