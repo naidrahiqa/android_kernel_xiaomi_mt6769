@@ -197,6 +197,11 @@ out:
 extern bool susfs_is_priority_uid_filtered(uid_t uid);
 #endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 
+#ifdef CONFIG_KSU_SUSFS
+/* BakaSU (SUSFS inline hook) expects this call in setresuid. */
+extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+#endif
+
 SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 {
 	struct task_struct *g, *p;
@@ -617,6 +622,10 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	struct cred *new;
 	int retval;
 	kuid_t kruid, keuid, ksuid;
+
+#ifdef CONFIG_KSU_SUSFS
+	(void)ksu_handle_setresuid(ruid, euid, suid);
+#endif
 
 	kruid = make_kuid(ns, ruid);
 	keuid = make_kuid(ns, euid);

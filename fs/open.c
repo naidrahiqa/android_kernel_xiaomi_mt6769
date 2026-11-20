@@ -34,6 +34,17 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/jump_label.h>
+#include <linux/susfs_def.h>
+
+/* BakaSU (SUSFS inline hook) expects this call in the faccessat path. */
+extern struct static_key_true ksu_su_compat_enabled;
+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+extern int ksu_handle_faccessat(int *dfd, struct filename **filename,
+				int *mode, int *__unused_flags);
+#endif
+
 int do_truncate2(struct vfsmount *mnt, struct dentry *dentry, loff_t length,
 		unsigned int time_attrs, struct file *filp)
 {
@@ -415,6 +426,9 @@ long do_faccessat(int dfd, const char __user *filename, int mode, int flags)
 	int res;
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 	const struct cred *old_cred = NULL;
+#ifdef CONFIG_KSU_SUSFS
+	struct filename *fname;
+#endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;
@@ -434,7 +448,19 @@ long do_faccessat(int dfd, const char __user *filename, int mode, int flags)
 	}
 
 retry:
+#ifdef CONFIG_KSU_SUSFS
+	fname = getname_flags(filename, lookup_flags, NULL);
+
+	if (likely(!susfs_is_current_proc_no_su()) &&
+	    static_branch_likely(&ksu_su_compat_enabled) &&
+	    unlikely(__ksu_is_allow_uid_for_current(current_uid().val)))
+		ksu_handle_faccessat(&dfd, &fname, &mode, NULL);
+
+	/* filename_lookup() consumes fname (including ERR_PTR). */
+	res = filename_lookup(dfd, fname, lookup_flags, &path, NULL);
+#else
 	res = user_path_at(dfd, filename, lookup_flags, &path);
+#endif
 	if (res)
 		goto out;
 
