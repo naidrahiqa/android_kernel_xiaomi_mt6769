@@ -126,6 +126,7 @@ build.log
 out/
 /out-ksu/
 /out-bakasu/
+/out-lto/
 /COS16-NOTES.md
 /.opencode/
 *.apk
