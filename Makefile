@@ -737,7 +737,12 @@ endif
 
 ifeq ($(CONFIG_MACH_MT6768),y)
 ifeq ($(cc-name),clang)
-KBUILD_CFLAGS   += -mcpu=cortex-a55 -mtune=cortex-a55
+# clang rejects the dotted big.LITTLE spelling ("cortex-a75.cortex-a55" is a
+# GCC-only argument), so pick one CPU. Tune for the big core: A75 and A55
+# expose an identical feature set here (AES/SHA2/CRC32/DOTPROD/FP16 all match),
+# so this only changes the scheduling model -- no instruction can end up
+# illegal when a task migrates onto a little core.
+KBUILD_CFLAGS   += -mcpu=cortex-a75 -mtune=cortex-a75
 endif
 
 ifeq ($(cc-name),gcc)
