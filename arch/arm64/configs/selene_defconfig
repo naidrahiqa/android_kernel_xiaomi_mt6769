@@ -591,3 +591,11 @@ CONFIG_SECURITY_SELINUX_BOOTPARAM=y
 # attaches, the manager never gets its [ksu_driver] fd -> Unsupported.
 CONFIG_FTRACE_SYSCALLS=y
 CONFIG_CPU_FREQ_MTK=y
+
+# ThinLTO: object files become LLVM bitcode and get optimised at link time.
+# Requires LD=ld.lld — with a non-lld LD the Makefile switches to
+# $(CROSS_COMPILE)ld.gold, which cross binutils does not ship. Verified with
+# clang 24: objects are bitcode (42 43 c0 de), vmlinux links, Image.gz-dtb
+# builds with the appended DTB intact.
+CONFIG_LTO_CLANG=y
+CONFIG_THINLTO=y
